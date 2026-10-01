@@ -1,13 +1,84 @@
 {
   "status": "sucesso",
-  "history_id": 17,
-  "score": {
-    "score": 1.0,
-    "checks": {
-      "ast_parse": 1,
-      "symbol_and_params": 1,
-      "decision_coverage": 1,
-      "operation_coverage": 1
+  "history_id": 34,
+  "model": "qwen2.5-coder:14b",
+  "attempts": 2,
+  "metrics": {
+    "contract_fidelity": {
+      "score": 1.0,
+      "checks": {
+        "ast_parse": 1,
+        "symbol_and_params": 1,
+        "decision_coverage": 1,
+        "operation_coverage": 1
+      }
+    },
+    "behavioral_equivalence": {
+      "score": 1.0,
+      "passed": 4,
+      "total": 4,
+      "scenarios": [
+        {
+          "name": "janela de 30 dias",
+          "equivalent": true,
+          "reason": "mesmo retorno e mesmo efeito",
+          "legacy": {
+            "error": null,
+            "result": [
+              "2"
+            ]
+          },
+          "python": {
+            "error": null,
+            "result": [
+              "2"
+            ]
+          }
+        },
+        {
+          "name": "janela de 5 dias",
+          "equivalent": true,
+          "reason": "mesmo retorno e mesmo efeito",
+          "legacy": {
+            "error": null,
+            "result": [
+              "3"
+            ]
+          },
+          "python": {
+            "error": null,
+            "result": [
+              "3"
+            ]
+          }
+        },
+        {
+          "name": "p_dias zero levanta antes do UPDATE",
+          "equivalent": true,
+          "reason": "mesmo erro",
+          "legacy": {
+            "error": "Parametro p_dias deve ser positivo, recebido: 0",
+            "result": null
+          },
+          "python": {
+            "error": "Parametro p_dias deve ser positivo, recebido: 0",
+            "result": null
+          }
+        },
+        {
+          "name": "p_dias nulo levanta",
+          "equivalent": true,
+          "reason": "mesmo erro",
+          "legacy": {
+            "error": "Parametro p_dias deve ser positivo, recebido: None",
+            "result": null
+          },
+          "python": {
+            "error": "Parametro p_dias deve ser positivo, recebido: None",
+            "result": null
+          }
+        }
+      ]
     }
   },
   "report": {
@@ -64,7 +135,8 @@
     "generation": {
       "ok": true,
       "error": null,
-      "model": "qwen2.5-coder:7b",
+      "model": "qwen2.5-coder:14b",
+      "attempts": 2,
       "decisions": [
         {
           "risk_id": "raise_exception",
@@ -108,7 +180,19 @@
       "ast_parse_ok": true,
       "ruff_ok": true,
       "symbol_ok": true,
-      "issues": []
+      "policy_ok": true,
+      "policy_issues": [],
+      "issues": [],
+      "behavioral": {
+        "score": 1.0,
+        "passed": 4,
+        "total": 4
+      }
+    },
+    "meta": {
+      "trace_id": "fb0eb97438dd1ce3fd2f86b2b201be3e",
+      "duration_ms": 139283,
+      "pipeline_version": "0.2.0"
     }
   }
 }

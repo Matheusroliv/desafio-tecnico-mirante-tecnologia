@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pglast import parse_plpgsql, parse_sql
 from pglast.parser import ParseError
 
@@ -17,7 +19,9 @@ TYPE_FAMILY = {
     "bool": "boolean",
 }
 
-MODE_NAME = {
+IMPLICIT_VARIABLES = {"found", "sqlstate", "sqlerrm"}
+
+MODE_NAME: dict[str, Literal["in", "out", "inout"]] = {
     "FUNC_PARAM_DEFAULT": "in",
     "FUNC_PARAM_IN": "in",
     "FUNC_PARAM_OUT": "out",
@@ -54,7 +58,8 @@ def parse_routine(source: str) -> RoutineIR:
 
 def _build(stmt, function: dict) -> RoutineIR:
     parameters = _parameters(stmt)
-    param_names = {item.name for item in parameters}
+    return_columns = _return_columns(stmt)
+    param_names = {item.name for item in parameters} | {item.name for item in return_columns} | IMPLICIT_VARIABLES
     ctx = _Ctx()
     _walk(function.get("action"), ctx)
     for datum in function.get("datums") or []:
@@ -67,15 +72,19 @@ def _build(stmt, function: dict) -> RoutineIR:
     for datum in function.get("datums") or []:
         var = datum.get("PLpgSQL_var") or {}
         name = var.get("refname")
-        if not name or name == "found" or name in param_names or var.get("cursor_explicit_expr"):
+        if not name or name in param_names or var.get("cursor_explicit_expr"):
             continue
-        variables.append(Variable(name=name, type_name="unknown"))
+        if name.startswith("__"):
+            continue
+        typname = ((var.get("datatype") or {}).get("PLpgSQL_type") or {}).get("typname") or "unknown"
+        variables.append(Variable(name=name, type_name=TYPE_FAMILY.get(typname.lower(), typname.lower())))
     return_type = _type_family(getattr(stmt, "returnType", None))
     setof = bool(getattr(getattr(stmt, "returnType", None), "setof", False))
     return RoutineIR(
         name=_routine_name(stmt),
         kind="procedure" if stmt.is_procedure else "function",
         parameters=parameters,
+        return_columns=return_columns,
         returns=None if stmt.is_procedure else return_type,
         set_returning=setof,
         language=_language(stmt),
@@ -94,6 +103,14 @@ def _build(stmt, function: dict) -> RoutineIR:
     )
 
 
+def _return_columns(stmt) -> list[Parameter]:
+    columns = []
+    for param in stmt.parameters or ():
+        if getattr(param.mode, "name", str(param.mode)) == "FUNC_PARAM_TABLE":
+            columns.append(Parameter(name=param.name, mode="out", type_name=_type_family(param.argType)))
+    return columns
+
+
 def _parameters(stmt) -> list[Parameter]:
     found = []
     for param in stmt.parameters or ():
@@ -101,16 +118,14 @@ def _parameters(stmt) -> list[Parameter]:
         mode = MODE_NAME.get(mode_name)
         if mode is None:
             continue
-        found.append(
-            Parameter(name=param.name, mode=mode, type_name=_type_family(param.argType))
-        )
+        found.append(Parameter(name=param.name, mode=mode, type_name=_type_family(param.argType)))
     return found
 
 
 def _type_family(type_name) -> str:
     if type_name is None:
         return "unknown"
-    names = getattr(type_name, "names", None) or ()
+    names = list(getattr(type_name, "names", None) or [])
     if not names:
         return "unknown"
     raw = getattr(names[-1], "sval", str(names[-1])).lower()
@@ -118,7 +133,9 @@ def _type_family(type_name) -> str:
 
 
 def _routine_name(stmt) -> str:
-    parts = stmt.funcname or ()
+    parts = list(stmt.funcname or [])
+    if not parts:
+        return "rotina"
     return getattr(parts[-1], "sval", "rotina")
 
 

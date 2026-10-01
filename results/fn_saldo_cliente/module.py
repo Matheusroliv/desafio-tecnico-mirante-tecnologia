@@ -1,12 +1,15 @@
 import psycopg
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
-def fn_saldo_cliente(conn: psycopg.Connection, p_cliente_id: object):
-    v_total = Decimal('0.00')
-    cursor = conn.cursor()
-    cursor.execute("SELECT COALESCE(SUM(saldo), 0) FROM contas WHERE cliente_id = %s AND status = 'ATIVA'", (p_cliente_id,))
-    result = cursor.fetchone()
-    if result:
-        v_total = Decimal(result[0])
-    cursor.close()
-    return v_total
+def fn_saldo_cliente(conn: psycopg.Connection, p_cliente_id: int) -> Decimal:
+    sql = """
+    SELECT COALESCE(SUM(saldo), 0)
+    FROM contas
+    WHERE cliente_id = %s
+      AND status = 'ATIVA';
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (p_cliente_id,))
+        result = cur.fetchone()
+        v_total = result[0] if result else Decimal("0.00")
+        return v_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

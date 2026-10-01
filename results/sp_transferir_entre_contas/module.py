@@ -1,93 +1,60 @@
 import psycopg
 from decimal import Decimal
 
-def sp_transferir_entre_contas(conn: psycopg.Connection, p_conta_origem: object, p_conta_destino: object, p_valor: object):
-    # DECISION: raise_exception
-    # DECISION: for_update
-    # DECISION: jsonb
-    # DECISION: exception_handler
-    # DECISION: three_valued_logic
-    # DECISION: audit_lost_on_rollback
-
+def sp_transferir_entre_contas(conn: psycopg.Connection, p_conta_origem: int, p_conta_destino: int, p_valor: Decimal, audit_conn: psycopg.Connection | None = None) -> None:
     if p_valor is None or p_valor <= 0:
         raise ValueError(f'Valor invalido para transferencia: {p_valor}')
 
     if p_conta_origem == p_conta_destino:
         raise ValueError('Conta de origem e destino nao podem ser iguais')
 
-    sql = """
-    SELECT saldo, status
-        FROM contas
-        WHERE id = %s
-        FOR UPDATE
-    """
-    conn.execute(sql, (p_conta_origem,))
-    v_saldo_origem, v_status_origem = conn.fetchone()
-
-    if v_saldo_origem is None:
-        raise ValueError(f'Conta de origem {p_conta_origem} nao encontrada')
-
-    sql = """
-    SELECT status
-        FROM contas
-        WHERE id = %s
-        FOR UPDATE
-    """
-    conn.execute(sql, (p_conta_destino,))
-    v_status_destino, = conn.fetchone()
-
-    if v_status_origem != 'ATIVA' or v_status_destino != 'ATIVA':
-        raise ValueError('Ambas as contas precisam estar ATIVAS')
-
-    if v_saldo_origem < p_valor:
-        raise ValueError(f'Saldo insuficiente: saldo={v_saldo_origem} valor={p_valor}')
-
-    sql = """
-    UPDATE contas SET saldo = saldo - %s WHERE id = %s
-    """
-    conn.execute(sql, (p_valor, p_conta_origem))
-
-    sql = """
-    UPDATE contas SET saldo = saldo + %s WHERE id = %s
-    """
-    conn.execute(sql, (p_valor, p_conta_destino))
-
-    sql = """
-    INSERT INTO transacoes (conta_origem_id, conta_destino_id, tipo, valor)
-    VALUES (%s, %s, 'TRANSFERENCIA', %s)
-    """
-    conn.execute(sql, (p_conta_origem, p_conta_destino, p_valor))
-
-    sql = """
-    INSERT INTO log_auditoria (entidade, entidade_id, acao, detalhes)
-    VALUES (
-        'transacoes',
-        NULL,
-        'TRANSFERENCIA_OK',
-        jsonb_build_object(
-            'origem', %s,
-            'destino', %s,
-            'valor', %s
-        )
-    )
-    """
-    conn.execute(sql, (p_conta_origem, p_conta_destino, p_valor))
-
     try:
-        conn.commit()
-    except Exception as e:
-        sql = """
-        INSERT INTO log_auditoria (entidade, acao, detalhes)
-        VALUES (
-            'transacoes',
-            'TRANSFERENCIA_ERRO',
-            jsonb_build_object(
-                'origem', %s,
-                'destino', %s,
-                'valor', %s,
-                'erro', %s
+        with conn.transaction():
+            cur = conn.execute(
+                "SELECT saldo, status FROM contas WHERE id = %s FOR UPDATE",
+                (p_conta_origem,)
             )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f'Conta de origem {p_conta_origem} nao encontrada')
+            v_saldo_origem, v_status_origem = row
+
+            cur = conn.execute(
+                "SELECT status FROM contas WHERE id = %s FOR UPDATE",
+                (p_conta_destino,)
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f'Conta de destino {p_conta_destino} nao encontrada')
+            v_status_destino = row[0]
+
+            if v_status_origem != 'ATIVA' or v_status_destino != 'ATIVA':
+                raise ValueError('Ambas as contas precisam estar ATIVAS')
+
+            if v_saldo_origem < p_valor:
+                raise ValueError(f'Saldo insuficiente: saldo={v_saldo_origem} valor={p_valor}')
+
+            conn.execute(
+                "UPDATE contas SET saldo = saldo - %s WHERE id = %s",
+                (p_valor, p_conta_origem)
+            )
+            conn.execute(
+                "UPDATE contas SET saldo = saldo + %s WHERE id = %s",
+                (p_valor, p_conta_destino)
+            )
+
+            conn.execute(
+                "INSERT INTO transacoes (conta_origem_id, conta_destino_id, tipo, valor) VALUES (%s, %s, %s, %s)",
+                (p_conta_origem, p_conta_destino, 'TRANSFERENCIA', p_valor)
+            )
+
+            conn.execute(
+                "INSERT INTO log_auditoria (entidade, entidade_id, acao, detalhes) VALUES (%s, %s, %s, %s)",
+                ('transacoes', None, 'TRANSFERENCIA_OK', psycopg.sql.SQL("jsonb_build_object('origem', %s::bigint, 'destino', %s::bigint, 'valor', %s::numeric)").as_tuple(p_conta_origem, p_conta_destino, p_valor))
+            )
+    except Exception as exc:
+        (audit_conn or conn).execute(
+            "INSERT INTO log_auditoria (entidade, acao, detalhes) VALUES (%s, %s, %s)",
+            ('transacoes', 'TRANSFERENCIA_ERRO', psycopg.sql.SQL("jsonb_build_object('origem', %s::bigint, 'destino', %s::bigint, 'valor', %s::numeric, 'erro', %s)").as_tuple(p_conta_origem, p_conta_destino, p_valor, str(exc)))
         )
-        """
-        conn.execute(sql, (p_conta_origem, p_conta_destino, p_valor, str(e)))
         raise

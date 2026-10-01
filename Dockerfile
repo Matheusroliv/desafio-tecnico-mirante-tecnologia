@@ -1,4 +1,9 @@
-FROM python:3.13-slim
+FROM python:3.14-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
@@ -8,7 +13,7 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install .
 
 COPY langgraph.json ./
 COPY fixtures ./fixtures
@@ -16,4 +21,7 @@ COPY db ./db
 
 EXPOSE 2024
 
-CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024", "--no-browser"]
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:2024/health', timeout=4)"
+
+CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024", "--no-browser", "--no-reload"]
