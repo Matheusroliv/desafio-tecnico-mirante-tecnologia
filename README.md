@@ -42,6 +42,29 @@ flowchart TD
 
 **Status.** `sucesso`: todas as checagens passaram. `parcial`: o código parseia, mas falhou em ruff, símbolo, `DECISION`, política ou em algum cenário de equivalência. `falha`: fonte inválida, LLM indisponível, código vazio ou `ast.parse` falhou depois do último reparo. Fonte vazia/corpo inválido é HTTP 422 e não entra no grafo; o resto é HTTP 200 com o desfecho no campo `status`. HTTP 500 só se o banco cair duas vezes.
 
+### Estrutura do código
+
+```
+src/modernize/
+  api/            app FastAPI publicado pelo langgraph.json (http.app) + schemas Pydantic
+  graph/          StateGraph, roteamento condicional e PipelineState (TypedDict)
+  nodes/          um módulo por nó: parse, analyze, generate, validate, persist
+  parsing/        pglast -> IR (único módulo que importa pglast)
+  ir/             modelos Pydantic do IR
+  analysis/       construtos, operações, dependências e riscos (regras)
+  generation/     prompt (política + instrução por risco + contrato) e adaptador de LLM
+  validation/     ast.parse, ruff, símbolo, DECISION e política por AST
+  evaluation/     Fidelidade de Contrato, Equivalência Comportamental (worker em subprocesso), cenários, runner
+  persistence/    porta HistoryRepository (Postgres e memória)
+  observability/  Langfuse (trace, spans, generation, scores) ou no-op
+  pipeline.py     uma execução com trace raiz (usado pela API e pelo runner)
+db/               init (databases auxiliares) e migração da modernization_history
+fixtures/         anexos A–F (SQL canônico) e massa do banco legado
+results/          saída da pipeline para B–F (module.py + report.json)
+tests/            pytest; tests/reference/ tem traduções escritas à mão que validam a métrica
+docs/             capturas do Langfuse
+```
+
 ### Catálogo de riscos e política de tradução
 
 A análise marca o risco; a política diz a ação (que vai para o relatório) e a instrução que o LLM recebe — **só para os riscos detectados**. É aqui que a parte determinística dirige a parte probabilística.
@@ -99,7 +122,7 @@ python -c "import json; print(json.dumps({'source_code': open('fixtures/fn_saldo
 curl -s -X POST http://localhost:2024/modernize -H "Content-Type: application/json" --data-binary @/tmp/b.json
 
 curl http://localhost:2024/history/1        # linha persistida em modernization_history
-curl -X POST http://localhost:2024/evaluate # roda B–F e devolve as duas métricas (5 chamadas de LLM)
+curl -X POST http://localhost:2024/evaluate # roda B–F e devolve as duas métricas (5+ chamadas de LLM; com modelo local, prefira o runner abaixo)
 ```
 
 Resposta de `/modernize` (resumida):
@@ -119,7 +142,7 @@ Resposta de `/modernize` (resumida):
 }
 ```
 
-A documentação interativa (OpenAPI) das rotas fica em `http://localhost:2024/docs`.
+A documentação interativa (OpenAPI) fica em `http://localhost:2024/docs`, junto com as rotas nativas do LangGraph Server (`/threads`, `/runs`, `/ok`...).
 
 ### Rodar fora do Docker
 
@@ -181,7 +204,7 @@ python -m modernize.evaluation.runner   # roda B–F pela pipeline, grava result
 O enunciado pede o servidor do **LangGraph CLI** e, ao mesmo tempo, rotas próprias. `langgraph.json` publica o grafo `modernize` e aponta `http.app` para um app FastAPI com `/health`, `/modernize`, `/evaluate` e `/history/{id}` — o mecanismo oficial de rotas customizadas. O handler chama `graph.invoke` em `asyncio.to_thread`, para não bloquear o loop do servidor.
 
 - *Alternativa descartada:* uvicorn + FastAPI direto. Cumpre os paths, descumpre o CLI. O health nativo (`GET /ok`) não substitui `/health`.
-- *Achado:* o projeto original declarava `langgraph-cli` sem o extra `[inmem]`; `langgraph dev` abortava com `Required package 'langgraph-api' is not installed`. Hoje a dependência é `langgraph-cli[inmem]` com `langgraph-api>=0.15` (a 0.10 já está em fim de vida).
+- *Dependência:* `langgraph-cli[inmem]` com `langgraph-api>=0.15`. Sem o extra `inmem`, `langgraph dev` aborta com `Required package 'langgraph-api' is not installed`.
 
 ### Parser: pglast + IR próprio
 
@@ -237,6 +260,16 @@ Validação barata dá sinal objetivo; uma volta ao LLM com o achado resolve boa
 | `langfuse` | bônus de observabilidade (SDK v4, OpenTelemetry) |
 | `ruff` | lint/format do projeto **e** lint do código gerado em tempo de execução |
 | dev: `pytest`, `pytest-cov`, `httpx`, `mypy` | testes, cobertura, cliente ASGI, tipos |
+
+### Modelo de LLM: local por padrão, provedor trocável
+
+Os resultados versionados foram gerados com **`qwen2.5-coder:14b` via Ollama**, rodando local. Foi uma escolha, não uma limitação de código:
+
+- **Sigilo:** stored procedures de núcleo bancário são código sensível; com modelo local + Langfuse self-hosted, nem a fonte nem o prompt saem da máquina.
+- **Reprodutibilidade:** qualquer avaliador regenera `results/` sem chave paga.
+- **Teste de estresse do desenho:** um modelo menor erra mais, e é justamente isso que exercita o que a pipeline acrescenta ao LLM — instrução por risco, política por AST, reparo e validação contra o legado. Com um modelo de fronteira, essas camadas ficariam menos visíveis.
+
+*Trade-off:* qualidade de tradução menor que a de modelos maiores (ver anexos D e E nos resultados). O adaptador fala o protocolo de chat da OpenAI, então trocar para `gpt-4.1` (padrão do `.env.example`), vLLM ou LiteLLM é só variável de ambiente; o Langfuse passa a mostrar custo em dólar automaticamente.
 
 ### Python 3.14
 
@@ -304,7 +337,7 @@ Lista de traces (um por execução, inclusive a de fonte inválida que terminou 
 Por rotina, quatro cheques 0/1 com peso: `ast_parse` 0,35 · `symbol_and_params` 0,25 (função com o nome da rotina, `conn` primeiro, cada IN na assinatura, cada OUT em `OutParams`) · `decision_coverage` 0,20 (um `# DECISION: <id>` por risco) · `operation_coverage` 0,20 (cada operação do IR aparece no módulo). Agregado = média simples.
 
 - **Captura:** se o módulo é utilizável e honra o contrato da tradução, de forma barata e determinística — roda em qualquer lugar, sem banco.
-- **Deixa de fora:** comportamento. Na rodada inicial do projeto (modelo de 7B), os cinco anexos tiraram **1,0** nesta métrica com código que não funcionava.
+- **Deixa de fora:** comportamento. Numa rodada de *baseline* (modelo de 7B, só validação estática), os cinco anexos tiraram **1,0** nesta métrica com código que não funcionava.
 
 ### Equivalência Comportamental (dinâmica)
 
@@ -317,7 +350,7 @@ Por isso a segunda métrica executa **a procedure original e a função gerada c
 
 São 25 cenários ([`evaluation/scenarios.py`](src/modernize/evaluation/scenarios.py)), cada um protegendo uma regra da política: lógica de três valores (destino inexistente no D), fallback do F, arredondamento/mínimo/ramo `ELSE`/origem nula/taxa não herdada no E, `p_dias` inválido no C, cliente sem conta no B. O código gerado roda **só num subprocesso com timeout**, nunca no processo do servidor.
 
-Validação da própria métrica (testes de integração): traduções de referência escritas à mão tiram **1,0** nos 25 cenários; uma versão ingênua do D (`!=` em vez de lógica de três valores) e uma do E (taxa herdada da linha anterior) caem abaixo de 1,0. Os módulos da rodada inicial de 7B, que tinham 1,0 na Fidelidade de Contrato, tiraram **0,40** aqui (B 1,0 · C 0,5 · D 0,25 · E 0,25 · F 0,0).
+Validação da própria métrica (testes de integração): traduções de referência escritas à mão tiram **1,0** nos 25 cenários; uma versão ingênua do D (`!=` em vez de lógica de três valores) e uma do E (taxa herdada da linha anterior) caem abaixo de 1,0. Os módulos da *baseline* de 7B, que tinham 1,0 na Fidelidade de Contrato, tiraram **0,40** aqui (B 1,0 · C 0,5 · D 0,25 · E 0,25 · F 0,0).
 
 - **Captura:** retorno, erro e efeito em tabela — o que o negócio sente.
 - **Deixa de fora:** cenários não escritos, concorrência (`FOR UPDATE` sob carga), desempenho/N+1 (coberto pela política estática), texto exato de mensagens com formatação de número diferente.
@@ -352,11 +385,11 @@ Evolução das rodadas sobre os mesmos cinco anexos (mostra por que a segunda m�
 
 | Rodada | Fidelidade de Contrato | Equivalência Comportamental |
 | --- | --- | --- |
-| Versão inicial do projeto, `qwen2.5-coder:7b`, só validação estática mínima | 1,00 | 0,40 |
+| *Baseline*: `qwen2.5-coder:7b`, só validação estática mínima | 1,00 | 0,40 |
 | `qwen2.5-coder:14b` + prompt com instrução por risco + política por AST + reparo | 1,00 | 0,70 |
 | `qwen2.5-coder:14b` + validação dinâmica alimentando o reparo (versão entregue) | 0,96 | 0,80 |
 
-Leitura: a métrica estática ficou praticamente parada em 1,0 enquanto o comportamento real dobrou. O que sobra é limite do modelo local, e a pipeline diz exatamente onde: no **D**, o 14B insiste em montar o JSON de auditoria com `psycopg.sql.SQL(...).as_tuple(...)` (API inexistente) e com `%s` sem cast, então toda chamada quebra antes de chegar às regras de negócio — o status fica `parcial` e o relatório lista os seis cenários. No **E**, importa `ROUND_HALF_UP` mas não arredonda `NUMERIC(18,2)` a cada atribuição; a tarifa de 1,875 vira 1,875 em vez de 1,88 e o cenário de arredondamento acusa "efeito diferente na tabela contas" — exatamente o caso que o cenário foi escrito para pegar. Com um modelo maior (`OPENAI_MODEL=gpt-4.1`), a mesma pipeline roda sem mudança de código; as traduções de referência em `tests/reference/` mostram que 1,0 nas duas métricas é alcançável.
+Leitura: a métrica estática ficou praticamente parada em 1,0 enquanto o comportamento real dobrou. O que sobra é limite do modelo local, e a pipeline diz exatamente onde: no **D**, o 14B insiste em montar o JSON de auditoria com `psycopg.sql.SQL(...).as_tuple(...)` (API inexistente) e com `%s` sem cast, então toda chamada quebra antes de chegar às regras de negócio — o status fica `parcial` e o relatório lista os seis cenários. No **E**, importa `ROUND_HALF_UP` mas não arredonda `NUMERIC(18,2)` a cada atribuição; a tarifa fica 1,875 em vez de 1,88 e o cenário de arredondamento acusa "efeito diferente na tabela contas" — exatamente o caso que o cenário foi escrito para pegar. Com um modelo maior (`OPENAI_MODEL=gpt-4.1`), a mesma pipeline roda sem mudança de código; as traduções de referência em `tests/reference/` mostram que 1,0 nas duas métricas é alcançável.
 
 ---
 
@@ -379,7 +412,7 @@ Propostas (não implementadas, por escopo):
 
 ## 8. Limitações conhecidas e próximos passos
 
-- **Qualidade depende do modelo.** Os resultados versionados saíram de um modelo local de 14B (sem custo, rodando na máquina do candidato). A política, o reparo e as métricas mostram onde ele erra; um modelo maior (ex.: `gpt-4.1`) tende a fechar os cenários restantes — basta trocar `OPENAI_MODEL` e rodar o runner.
+- **Qualidade depende do modelo.** Os resultados versionados saíram de um modelo local de 14B (ver [Modelo de LLM](#modelo-de-llm-local-por-padrão-provedor-trocável)). A política, o reparo e as métricas mostram onde ele erra; um modelo maior (ex.: `gpt-4.1`) tende a fechar os cenários restantes — basta trocar `OPENAI_MODEL` e rodar o runner.
 - Temperatura 0 não torna o LLM determinístico entre versões; `results/` é uma execução, não um *snapshot* eterno.
 - A Equivalência Comportamental prova só os 25 cenários escritos e compara mensagens de erro literalmente.
 - O subprocesso da métrica isola memória e tempo, **não privilégio**: o código gerado ainda tem rede e disco. Produção pede sandbox.
