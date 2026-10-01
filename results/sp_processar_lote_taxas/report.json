@@ -1,6 +1,6 @@
 {
-  "status": "parcial",
-  "history_id": 14,
+  "status": "sucesso",
+  "history_id": 19,
   "score": {
     "score": 1.0,
     "checks": {
@@ -60,7 +60,7 @@
     "generation": {
       "ok": true,
       "error": null,
-      "model": "qwen2.5-coder:14b",
+      "model": "qwen2.5-coder:7b",
       "decisions": [
         {
           "risk_id": "cursor_n_plus_1",
@@ -95,32 +95,11 @@
       ]
     },
     "validation": {
-      "ok": false,
+      "ok": true,
       "ast_parse_ok": true,
-      "ruff_ok": false,
+      "ruff_ok": true,
       "symbol_ok": true,
-      "issues": [
-        "F401 [*] `psycopg` imported but unused",
-        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmp43v775mi.py:1:8",
-        "|",
-        "1 | import psycopg",
-        "|        ^^^^^^^",
-        "2 |",
-        "3 | def sp_processar_lote_taxas(conn, p_data_referencia):",
-        "|",
-        "help: Remove unused import: `psycopg`",
-        "|",
-        "- import psycopg",
-        "1 |",
-        "|",
-        "F821 Undefined name `Decimal`",
-        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmp43v775mi.py:19:25",
-        "|",
-        "17 |         transacoes = cur.fetchall()",
-        "18 |",
-        "19 |         v_total_taxas = Decimal('0')",
-        "|                         ^^^^^^^"
-      ]
+      "issues": []
     }
   }
 }

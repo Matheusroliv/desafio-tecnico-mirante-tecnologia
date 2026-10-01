@@ -82,15 +82,46 @@ def decisions_for(ir: RoutineIR) -> list[Decision]:
     return found
 
 
+def _contract(ir: RoutineIR) -> str:
+    ins = [item.name for item in ir.parameters if item.mode != "out"]
+    outs = [item.name for item in ir.parameters if item.mode == "out"]
+    signature = ", ".join(["conn: psycopg.Connection", *[f"{name}: object" for name in ins]])
+    lines = [
+        "CONTRATO DE SAIDA. O arquivo e invalido se faltar qualquer item.",
+        f"1. Assinatura: def {ir.name}({signature}):",
+        "2. import psycopg na primeira linha. O nome psycopg tem de aparecer na anotacao conn: psycopg.Connection.",
+        "3. Se houver NUMERIC, from decimal import Decimal. Use Decimal. Nunca float.",
+        "4. Sem cerca ``` e sem frase antes ou depois do codigo.",
+        "5. Parenteses, aspas e blocos fechados. ast.parse tem de aceitar o arquivo.",
+        "6. Nao importe nome que o corpo nao usa.",
+    ]
+    if outs:
+        fields = "\n".join(f"    {name}: int" for name in outs)
+        lines.append(
+            "7. OUT nao entra na assinatura. Declare e retorne esta classe:\n"
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class OutParams:\n"
+            f"{fields}"
+        )
+    else:
+        lines.append("7. Nao declare OutParams.")
+    if ir.risks:
+        lines.append("8. Copie estas linhas dentro da funcao, exatamente assim:")
+        lines.extend(f"# DECISION: {risk.id}" for risk in ir.risks)
+    else:
+        lines.append("8. Nao invente comentario DECISION.")
+    return "\n".join(lines)
+
+
 def build_prompt(ir: RoutineIR, schema_ddl: str | None, source: str) -> str:
     decisions = [item.model_dump() for item in decisions_for(ir)]
-    comments = [f"# DECISION: {risk.id}" for risk in ir.risks]
     return "\n\n".join(
         [
             POLICY,
             ir.model_dump_json(),
             str(decisions),
-            "\n".join(comments) if comments else "(sem riscos)",
+            _contract(ir),
             schema_ddl.strip() if schema_ddl and schema_ddl.strip() else "nenhum schema informado",
             source,
         ]

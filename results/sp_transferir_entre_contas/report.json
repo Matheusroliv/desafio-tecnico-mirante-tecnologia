@@ -1,11 +1,11 @@
 {
-  "status": "falha",
-  "history_id": 13,
+  "status": "parcial",
+  "history_id": 18,
   "score": {
-    "score": 0.4,
+    "score": 1.0,
     "checks": {
-      "ast_parse": 0,
-      "symbol_and_params": 0,
+      "ast_parse": 1,
+      "symbol_and_params": 1,
       "decision_coverage": 1,
       "operation_coverage": 1
     }
@@ -73,7 +73,7 @@
     "generation": {
       "ok": true,
       "error": null,
-      "model": "qwen2.5-coder:14b",
+      "model": "qwen2.5-coder:7b",
       "decisions": [
         {
           "risk_id": "raise_exception",
@@ -124,11 +124,27 @@
     },
     "validation": {
       "ok": false,
-      "ast_parse_ok": false,
+      "ast_parse_ok": true,
       "ruff_ok": false,
-      "symbol_ok": false,
+      "symbol_ok": true,
       "issues": [
-        "ast.parse: invalid syntax"
+        "F401 [*] `decimal.Decimal` imported but unused",
+        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmp9wspo1k_.py:2:21",
+        "|",
+        "1 | import psycopg",
+        "2 | from decimal import Decimal",
+        "|                     ^^^^^^^",
+        "3 |",
+        "4 | def sp_transferir_entre_contas(conn: psycopg.Connection, p_conta_origem: object, p_conta_destino: object, p_valor: object):",
+        "|",
+        "help: Remove unused import: `decimal.Decimal`",
+        "|",
+        "1 | import psycopg",
+        "- from decimal import Decimal",
+        "2 |",
+        "|",
+        "Found 1 error.",
+        "[*] 1 fixable with the `--fix` option."
       ]
     }
   }

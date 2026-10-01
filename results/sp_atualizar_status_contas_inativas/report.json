@@ -1,11 +1,11 @@
 {
-  "status": "parcial",
-  "history_id": 12,
+  "status": "sucesso",
+  "history_id": 17,
   "score": {
-    "score": 0.75,
+    "score": 1.0,
     "checks": {
       "ast_parse": 1,
-      "symbol_and_params": 0,
+      "symbol_and_params": 1,
       "decision_coverage": 1,
       "operation_coverage": 1
     }
@@ -64,7 +64,7 @@
     "generation": {
       "ok": true,
       "error": null,
-      "model": "qwen2.5-coder:14b",
+      "model": "qwen2.5-coder:7b",
       "decisions": [
         {
           "risk_id": "raise_exception",
@@ -104,28 +104,11 @@
       ]
     },
     "validation": {
-      "ok": false,
+      "ok": true,
       "ast_parse_ok": true,
-      "ruff_ok": false,
-      "symbol_ok": false,
-      "issues": [
-        "OutParams sem os campos de saida",
-        "F401 [*] `psycopg` imported but unused",
-        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmpu29r3fmb.py:1:8",
-        "|",
-        "1 | import psycopg",
-        "|        ^^^^^^^",
-        "2 |",
-        "3 | class OutParams:",
-        "|",
-        "help: Remove unused import: `psycopg`",
-        "|",
-        "- import psycopg",
-        "1 |",
-        "|",
-        "Found 1 error.",
-        "[*] 1 fixable with the `--fix` option."
-      ]
+      "ruff_ok": true,
+      "symbol_ok": true,
+      "issues": []
     }
   }
 }

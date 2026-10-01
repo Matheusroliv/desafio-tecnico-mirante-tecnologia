@@ -1,6 +1,6 @@
 {
-  "status": "parcial",
-  "history_id": 11,
+  "status": "sucesso",
+  "history_id": 16,
   "score": {
     "score": 1.0,
     "checks": {
@@ -55,32 +55,11 @@
       ]
     },
     "validation": {
-      "ok": false,
+      "ok": true,
       "ast_parse_ok": true,
-      "ruff_ok": false,
+      "ruff_ok": true,
       "symbol_ok": true,
-      "issues": [
-        "F401 [*] `psycopg` imported but unused",
-        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmppw9f49p7.py:1:8",
-        "|",
-        "1 | import psycopg",
-        "|        ^^^^^^^",
-        "2 |",
-        "3 | def fn_saldo_cliente(conn, p_cliente_id: int) -> Decimal:",
-        "|",
-        "help: Remove unused import: `psycopg`",
-        "|",
-        "- import psycopg",
-        "1 |",
-        "|",
-        "F821 Undefined name `Decimal`",
-        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmppw9f49p7.py:3:50",
-        "|",
-        "1 | import psycopg",
-        "2 |",
-        "3 | def fn_saldo_cliente(conn, p_cliente_id: int) -> Decimal:",
-        "|                                                  ^^^^^^^"
-      ]
+      "issues": []
     }
   }
 }

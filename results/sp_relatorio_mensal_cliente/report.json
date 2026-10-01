@@ -1,6 +1,6 @@
 {
   "status": "parcial",
-  "history_id": 15,
+  "history_id": 20,
   "score": {
     "score": 1.0,
     "checks": {
@@ -71,7 +71,7 @@
     "generation": {
       "ok": true,
       "error": null,
-      "model": "qwen2.5-coder:14b",
+      "model": "qwen2.5-coder:7b",
       "decisions": [
         {
           "risk_id": "raise_exception",
@@ -121,21 +121,16 @@
       "ruff_ok": false,
       "symbol_ok": true,
       "issues": [
-        "F401 [*] `psycopg` imported but unused",
-        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmpnx__msk1.py:1:8",
+        "F821 Undefined name `fn_saldo_cliente`",
+        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmpzpf6d858.py:15:21",
         "|",
-        "1 | import psycopg",
-        "|        ^^^^^^^",
-        "2 |",
-        "3 | def sp_relatorio_mensal_cliente(conn, p_cliente_id, p_data_inicio, p_data_fim):",
+        "13 |         raise ValueError(f'Periodo invalido: inicio {p_data_inicio} > fim {p_data_fim}')",
+        "14 |",
+        "15 |     v_saldo_atual = fn_saldo_cliente(conn, p_cliente_id)",
+        "|                     ^^^^^^^^^^^^^^^^",
+        "16 |     print(f'Saldo atual do cliente {p_cliente_id}: {v_saldo_atual}')",
         "|",
-        "help: Remove unused import: `psycopg`",
-        "|",
-        "- import psycopg",
-        "1 |",
-        "|",
-        "Found 1 error.",
-        "[*] 1 fixable with the `--fix` option."
+        "Found 1 error."
       ]
     }
   }
