@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.pyc
+.env
+agent.md
+PRD.md
+Desafio_Tecnico_Inovacao_v2_candidatos 4.pdf

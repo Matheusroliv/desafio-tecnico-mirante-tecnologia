@@ -1,0 +1,10 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "modernize": "./src/modernize/graph/builder.py:graph"
+  },
+  "env": ".env",
+  "http": {
+    "app": "./src/modernize/api/app.py:app"
+  }
+}
