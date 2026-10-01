@@ -1,0 +1,272 @@
+{
+  "status": "parcial",
+  "history_id": 35,
+  "model": "qwen2.5-coder:14b",
+  "attempts": 3,
+  "metrics": {
+    "contract_fidelity": {
+      "score": 0.8,
+      "checks": {
+        "ast_parse": 1,
+        "symbol_and_params": 1,
+        "decision_coverage": 0,
+        "operation_coverage": 1
+      }
+    },
+    "behavioral_equivalence": {
+      "score": 0.25,
+      "passed": 2,
+      "total": 8,
+      "scenarios": [
+        {
+          "name": "transferencia valida",
+          "equivalent": false,
+          "reason": "python levantou erro e o legado nao: 'SQL' object has no attribute 'as_tuple'",
+          "legacy": {
+            "error": null,
+            "result": null
+          },
+          "python": {
+            "error": "'SQL' object has no attribute 'as_tuple'",
+            "result": null
+          }
+        },
+        {
+          "name": "valor zero",
+          "equivalent": true,
+          "reason": "mesmo erro",
+          "legacy": {
+            "error": "Valor invalido para transferencia: 0.00",
+            "result": null
+          },
+          "python": {
+            "error": "Valor invalido para transferencia: 0.00",
+            "result": null
+          }
+        },
+        {
+          "name": "origem igual ao destino",
+          "equivalent": true,
+          "reason": "mesmo erro",
+          "legacy": {
+            "error": "Conta de origem e destino nao podem ser iguais",
+            "result": null
+          },
+          "python": {
+            "error": "Conta de origem e destino nao podem ser iguais",
+            "result": null
+          }
+        },
+        {
+          "name": "origem inexistente",
+          "equivalent": false,
+          "reason": "mensagens de erro diferentes: legado='Conta de origem 999 nao encontrada' python=\"'SQL' object has no attribute 'as_tuple'\"",
+          "legacy": {
+            "error": "Conta de origem 999 nao encontrada",
+            "result": null
+          },
+          "python": {
+            "error": "'SQL' object has no attribute 'as_tuple'",
+            "result": null
+          }
+        },
+        {
+          "name": "destino inexistente: NULL <> 'ATIVA' nao dispara o IF (erro vem da FK)",
+          "equivalent": false,
+          "reason": "mensagens de erro diferentes: legado='insert or update on table \"transacoes\" violates foreign key constraint \"transacoes_conta_destino_id_fkey\"' python=\"'SQL' object has no attribute 'as_tuple'\"",
+          "legacy": {
+            "error": "insert or update on table \"transacoes\" violates foreign key constraint \"transacoes_conta_destino_id_fkey\"",
+            "result": null
+          },
+          "python": {
+            "error": "'SQL' object has no attribute 'as_tuple'",
+            "result": null
+          }
+        },
+        {
+          "name": "destino inativo",
+          "equivalent": false,
+          "reason": "mensagens de erro diferentes: legado='Ambas as contas precisam estar ATIVAS' python=\"'SQL' object has no attribute 'as_tuple'\"",
+          "legacy": {
+            "error": "Ambas as contas precisam estar ATIVAS",
+            "result": null
+          },
+          "python": {
+            "error": "'SQL' object has no attribute 'as_tuple'",
+            "result": null
+          }
+        },
+        {
+          "name": "saldo insuficiente",
+          "equivalent": false,
+          "reason": "mensagens de erro diferentes: legado='Saldo insuficiente: saldo=500.50 valor=5000.00' python=\"'SQL' object has no attribute 'as_tuple'\"",
+          "legacy": {
+            "error": "Saldo insuficiente: saldo=500.50 valor=5000.00",
+            "result": null
+          },
+          "python": {
+            "error": "'SQL' object has no attribute 'as_tuple'",
+            "result": null
+          }
+        },
+        {
+          "name": "valor igual ao saldo passa",
+          "equivalent": false,
+          "reason": "python levantou erro e o legado nao: 'SQL' object has no attribute 'as_tuple'",
+          "legacy": {
+            "error": null,
+            "result": null
+          },
+          "python": {
+            "error": "'SQL' object has no attribute 'as_tuple'",
+            "result": null
+          }
+        }
+      ]
+    }
+  },
+  "report": {
+    "parsing": {
+      "ok": true,
+      "error": null,
+      "routine_name": "sp_transferir_entre_contas",
+      "routine_kind": "procedure"
+    },
+    "semantic_analysis": {
+      "ok": true,
+      "constructs": [
+        "parameter_in",
+        "variable",
+        "raise",
+        "for_update",
+        "jsonb",
+        "exception_handler",
+        "select_into"
+      ],
+      "risks": [
+        {
+          "id": "raise_exception",
+          "detail": "RAISE EXCEPTION"
+        },
+        {
+          "id": "for_update",
+          "detail": "FOR UPDATE"
+        },
+        {
+          "id": "jsonb",
+          "detail": "JSONB"
+        },
+        {
+          "id": "exception_handler",
+          "detail": "bloco EXCEPTION"
+        },
+        {
+          "id": "three_valued_logic",
+          "detail": "comparacao com variavel que pode ser NULL"
+        },
+        {
+          "id": "audit_lost_on_rollback",
+          "detail": "INSERT de erro seguido de RAISE na mesma transacao"
+        }
+      ],
+      "operations": [
+        {
+          "kind": "select",
+          "count": 2
+        },
+        {
+          "kind": "update",
+          "count": 2
+        },
+        {
+          "kind": "insert",
+          "count": 3
+        }
+      ],
+      "dependencies": []
+    },
+    "generation": {
+      "ok": true,
+      "error": null,
+      "model": "qwen2.5-coder:14b",
+      "attempts": 3,
+      "decisions": [
+        {
+          "risk_id": "raise_exception",
+          "action": "rewritten_python",
+          "rationale": "RAISE vira excecao Python com a mesma mensagem."
+        },
+        {
+          "risk_id": "for_update",
+          "action": "delegated_sql",
+          "rationale": "FOR UPDATE permanece no SQL, dentro da transacao do chamador."
+        },
+        {
+          "risk_id": "jsonb",
+          "action": "delegated_sql",
+          "rationale": "jsonb_build_object permanece no SQL."
+        },
+        {
+          "risk_id": "exception_handler",
+          "action": "rewritten_python",
+          "rationale": "EXCEPTION vira try/except no mesmo bloco, com savepoint."
+        },
+        {
+          "risk_id": "three_valued_logic",
+          "action": "preserved",
+          "rationale": "Desigualdade com NULL nao dispara o if."
+        },
+        {
+          "risk_id": "audit_lost_on_rollback",
+          "action": "divergent",
+          "rationale": "Log de erro sobrevive so se o chamador passar audit_conn."
+        },
+        {
+          "risk_id": "op:select",
+          "action": "delegated_sql",
+          "rationale": "select permanece na traducao combinada"
+        },
+        {
+          "risk_id": "op:update",
+          "action": "delegated_sql",
+          "rationale": "update permanece na traducao combinada"
+        },
+        {
+          "risk_id": "op:insert",
+          "action": "delegated_sql",
+          "rationale": "insert permanece na traducao combinada"
+        }
+      ]
+    },
+    "validation": {
+      "ok": false,
+      "ast_parse_ok": true,
+      "ruff_ok": true,
+      "symbol_ok": true,
+      "policy_ok": false,
+      "policy_issues": [
+        "no_untyped_jsonb_param: placeholder sem cast dentro de jsonb_build_object; use %s::bigint, %s::numeric, %s::date ou %s::text"
+      ],
+      "issues": [
+        "no_untyped_jsonb_param: placeholder sem cast dentro de jsonb_build_object; use %s::bigint, %s::numeric, %s::date ou %s::text",
+        "DECISION ausente: raise_exception, for_update, jsonb, exception_handler, three_valued_logic, audit_lost_on_rollback",
+        "equivalencia (transferencia valida): python levantou erro e o legado nao: 'SQL' object has no attribute 'as_tuple'",
+        "equivalencia (origem inexistente): mensagens de erro diferentes: legado='Conta de origem 999 nao encontrada' python=\"'SQL' object has no attribute 'as_tuple'\"",
+        "equivalencia (destino inexistente: NULL <> 'ATIVA' nao dispara o IF (erro vem da FK)): mensagens de erro diferentes: legado='insert or update on table \"transacoes\" violates foreign key constraint \"transacoes_conta_destino_id_fkey\"' python=\"'SQL' object has no attribute 'as_tuple'\"",
+        "equivalencia (destino inativo): mensagens de erro diferentes: legado='Ambas as contas precisam estar ATIVAS' python=\"'SQL' object has no attribute 'as_tuple'\"",
+        "equivalencia (saldo insuficiente): mensagens de erro diferentes: legado='Saldo insuficiente: saldo=500.50 valor=5000.00' python=\"'SQL' object has no attribute 'as_tuple'\"",
+        "equivalencia (valor igual ao saldo passa): python levantou erro e o legado nao: 'SQL' object has no attribute 'as_tuple'"
+      ],
+      "behavioral": {
+        "score": 0.25,
+        "passed": 2,
+        "total": 8
+      }
+    },
+    "meta": {
+      "trace_id": "6393c77d80661a8504e1c9583ecc2ba7",
+      "duration_ms": 505012,
+      "pipeline_version": "0.2.0"
+    }
+  }
+}

@@ -43,6 +43,7 @@ class RoutineIR(BaseModel):
     name: str
     kind: Literal["function", "procedure"]
     parameters: list[Parameter]
+    return_columns: list[Parameter] = Field(default_factory=list)
     returns: str | None
     set_returning: bool
     language: str

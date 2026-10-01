@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: pipeline
+          POSTGRES_PASSWORD: pipeline
+          POSTGRES_DB: pipeline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pipeline -d pipeline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://pipeline:pipeline@localhost:5432/pipeline
+      LEGACY_DATABASE_URL: postgresql://pipeline:pipeline@localhost:5432/legacy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -e ".[dev]"
+      - name: Criar databases auxiliares
+        run: psql "postgresql://pipeline:pipeline@localhost:5432/pipeline" -f db/init/01-databases.sql
+      - name: ruff (lint)
+        run: ruff check src tests
+      - name: ruff (format)
+        run: ruff format --check src tests
+      - name: mypy
+        run: mypy
+      - name: pytest (unitarios + integracao, cobertura >= 85%)
+        run: pytest

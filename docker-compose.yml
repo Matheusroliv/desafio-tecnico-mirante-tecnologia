@@ -1,3 +1,37 @@
+# Uso:
+#   docker compose up --build                              -> Postgres + servidor LangGraph (porta 2024)
+#   docker compose --profile observability up --build      -> + Langfuse self-hosted (porta 3000)
+#
+# Credenciais abaixo sao de desenvolvimento local. Troque todas antes de expor qualquer porta.
+
+x-langfuse-env: &langfuse-env
+  DATABASE_URL: postgresql://pipeline:pipeline@postgres:5432/langfuse
+  NEXTAUTH_URL: http://localhost:3000
+  NEXTAUTH_SECRET: local-dev-nextauth-secret
+  SALT: local-dev-salt
+  ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+  TELEMETRY_ENABLED: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: clickhouse
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: local-dev-redis
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+
 services:
   postgres:
     image: postgres:17
@@ -8,7 +42,10 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./db/init:/docker-entrypoint-initdb.d
+      - pgdata:/var/lib/postgresql/data
+      # Init roda so com volume vazio: 01 cria os databases auxiliares, 02 aplica a migracao da pipeline.
+      - ./db/init/01-databases.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+      - ./db/migrations/001_init.sql:/docker-entrypoint-initdb.d/02-001_init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pipeline -d pipeline"]
       interval: 5s
@@ -21,12 +58,107 @@ services:
       - "2024:2024"
     environment:
       DATABASE_URL: postgresql://pipeline:pipeline@postgres:5432/pipeline
+      LEGACY_DATABASE_URL: postgresql://pipeline:pipeline@postgres:5432/legacy
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_BASE_URL: ${DOCKER_OPENAI_BASE_URL:-${OPENAI_BASE_URL:-https://api.openai.com/v1}}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
+      OPENAI_EXTRA_BODY: ${OPENAI_EXTRA_BODY:-}
+      MAX_REPAIR_ATTEMPTS: ${MAX_REPAIR_ATTEMPTS:-1}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://localhost:3000}
+      LANGFUSE_HOST: http://langfuse-web:3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
+
+  langfuse-worker:
+    profiles: ["observability"]
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    restart: unless-stopped
+    depends_on: &langfuse-depends
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      <<: *langfuse-env
+
+  langfuse-web:
+    profiles: ["observability"]
+    image: docker.langfuse.com/langfuse/langfuse:4
+    restart: unless-stopped
+    depends_on: *langfuse-depends
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *langfuse-env
+      # Inicializacao headless: organizacao, projeto, chaves e usuario prontos no primeiro boot.
+      LANGFUSE_INIT_ORG_ID: mirante
+      LANGFUSE_INIT_ORG_NAME: Mirante
+      LANGFUSE_INIT_PROJECT_ID: modernize
+      LANGFUSE_INIT_PROJECT_NAME: modernize-plpgsql
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-local-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-local-dev}
+      LANGFUSE_INIT_USER_EMAIL: admin@local.dev
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: admin12345
+
+  clickhouse:
+    profiles: ["observability"]
+    image: docker.io/clickhouse/clickhouse-server:25.12
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  minio:
+    profiles: ["observability"]
+    image: cgr.dev/chainguard/minio
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+  redis:
+    profiles: ["observability"]
+    image: docker.io/redis:7
+    restart: unless-stopped
+    command: --requirepass local-dev-redis --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "local-dev-redis", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  pgdata:
+  clickhouse_data:
+  clickhouse_logs:
+  minio_data:

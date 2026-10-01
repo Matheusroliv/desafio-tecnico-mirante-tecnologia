@@ -3,7 +3,12 @@
 **/__pycache__
 .pytest_cache
 .ruff_cache
+.mypy_cache
+.coverage
+.langgraph_api
 .env
 agent.md
 PRD.md
 *.pdf
+results
+docs

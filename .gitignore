@@ -3,8 +3,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
+htmlcov/
+.langgraph_api/
 *.pyc
 .env
 agent.md
 PRD.md
 Desafio_Tecnico_Inovacao_v2_candidatos 4.pdf
+*.egg-info/

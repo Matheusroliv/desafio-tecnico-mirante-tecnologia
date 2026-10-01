@@ -1,0 +1,198 @@
+{
+  "status": "sucesso",
+  "history_id": 34,
+  "model": "qwen2.5-coder:14b",
+  "attempts": 2,
+  "metrics": {
+    "contract_fidelity": {
+      "score": 1.0,
+      "checks": {
+        "ast_parse": 1,
+        "symbol_and_params": 1,
+        "decision_coverage": 1,
+        "operation_coverage": 1
+      }
+    },
+    "behavioral_equivalence": {
+      "score": 1.0,
+      "passed": 4,
+      "total": 4,
+      "scenarios": [
+        {
+          "name": "janela de 30 dias",
+          "equivalent": true,
+          "reason": "mesmo retorno e mesmo efeito",
+          "legacy": {
+            "error": null,
+            "result": [
+              "2"
+            ]
+          },
+          "python": {
+            "error": null,
+            "result": [
+              "2"
+            ]
+          }
+        },
+        {
+          "name": "janela de 5 dias",
+          "equivalent": true,
+          "reason": "mesmo retorno e mesmo efeito",
+          "legacy": {
+            "error": null,
+            "result": [
+              "3"
+            ]
+          },
+          "python": {
+            "error": null,
+            "result": [
+              "3"
+            ]
+          }
+        },
+        {
+          "name": "p_dias zero levanta antes do UPDATE",
+          "equivalent": true,
+          "reason": "mesmo erro",
+          "legacy": {
+            "error": "Parametro p_dias deve ser positivo, recebido: 0",
+            "result": null
+          },
+          "python": {
+            "error": "Parametro p_dias deve ser positivo, recebido: 0",
+            "result": null
+          }
+        },
+        {
+          "name": "p_dias nulo levanta",
+          "equivalent": true,
+          "reason": "mesmo erro",
+          "legacy": {
+            "error": "Parametro p_dias deve ser positivo, recebido: None",
+            "result": null
+          },
+          "python": {
+            "error": "Parametro p_dias deve ser positivo, recebido: None",
+            "result": null
+          }
+        }
+      ]
+    }
+  },
+  "report": {
+    "parsing": {
+      "ok": true,
+      "error": null,
+      "routine_name": "sp_atualizar_status_contas_inativas",
+      "routine_kind": "procedure"
+    },
+    "semantic_analysis": {
+      "ok": true,
+      "constructs": [
+        "parameter_in",
+        "parameter_out",
+        "raise",
+        "jsonb",
+        "get_diagnostics",
+        "bulk_update"
+      ],
+      "risks": [
+        {
+          "id": "raise_exception",
+          "detail": "RAISE EXCEPTION"
+        },
+        {
+          "id": "jsonb",
+          "detail": "JSONB"
+        },
+        {
+          "id": "get_diagnostics",
+          "detail": "GET DIAGNOSTICS"
+        },
+        {
+          "id": "out_parameter",
+          "detail": "parametro OUT"
+        },
+        {
+          "id": "bulk_update",
+          "detail": "UPDATE de conjunto"
+        }
+      ],
+      "operations": [
+        {
+          "kind": "update",
+          "count": 1
+        },
+        {
+          "kind": "insert",
+          "count": 1
+        }
+      ],
+      "dependencies": []
+    },
+    "generation": {
+      "ok": true,
+      "error": null,
+      "model": "qwen2.5-coder:14b",
+      "attempts": 2,
+      "decisions": [
+        {
+          "risk_id": "raise_exception",
+          "action": "rewritten_python",
+          "rationale": "RAISE vira excecao Python com a mesma mensagem."
+        },
+        {
+          "risk_id": "jsonb",
+          "action": "delegated_sql",
+          "rationale": "jsonb_build_object permanece no SQL."
+        },
+        {
+          "risk_id": "get_diagnostics",
+          "action": "rewritten_python",
+          "rationale": "rowcount do UPDATE, lido antes do INSERT de auditoria."
+        },
+        {
+          "risk_id": "out_parameter",
+          "action": "rewritten_python",
+          "rationale": "OUT vira campo da dataclass OutParams."
+        },
+        {
+          "risk_id": "bulk_update",
+          "action": "delegated_sql",
+          "rationale": "UPDATE de conjunto permanece um unico comando SQL."
+        },
+        {
+          "risk_id": "op:update",
+          "action": "delegated_sql",
+          "rationale": "UPDATE permanece SQL. O intervalo de dias usa make_interval."
+        },
+        {
+          "risk_id": "op:insert",
+          "action": "delegated_sql",
+          "rationale": "insert permanece na traducao combinada"
+        }
+      ]
+    },
+    "validation": {
+      "ok": true,
+      "ast_parse_ok": true,
+      "ruff_ok": true,
+      "symbol_ok": true,
+      "policy_ok": true,
+      "policy_issues": [],
+      "issues": [],
+      "behavioral": {
+        "score": 1.0,
+        "passed": 4,
+        "total": 4
+      }
+    },
+    "meta": {
+      "trace_id": "fb0eb97438dd1ce3fd2f86b2b201be3e",
+      "duration_ms": 139283,
+      "pipeline_version": "0.2.0"
+    }
+  }
+}
