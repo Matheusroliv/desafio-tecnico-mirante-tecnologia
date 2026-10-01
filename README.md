@@ -1,16 +1,29 @@
 # Pipeline híbrida de modernização PL/pgSQL → Python 3.14
 
-Recebe o código de uma stored procedure PL/pgSQL (e, opcionalmente, o DDL das tabelas) e devolve um módulo Python 3.14 equivalente, com um relatório das decisões e validações de cada etapa. A pipeline é híbrida: **parsing, análise semântica, validação, persistência e métricas são determinísticos**; só a **geração** usa LLM, e o prompt é montado a partir das saídas das etapas anteriores.
+[![ci](https://github.com/Matheusroliv/desafio-tecnico-mirante-tecnologia/actions/workflows/ci.yml/badge.svg)](https://github.com/Matheusroliv/desafio-tecnico-mirante-tecnologia/actions/workflows/ci.yml)
+
+Recebe o código de uma stored procedure PL/pgSQL (e, opcionalmente, o DDL das tabelas) e devolve um módulo Python 3.14, um relatório das decisões e validações de cada etapa e, quando há banco de teste, a medida de equivalência com a procedure original. A pipeline é híbrida: **parsing, análise semântica, validação, persistência e métricas são determinísticos**; só a **geração** usa LLM, e o prompt é montado a partir das saídas das etapas anteriores.
 
 | Requisito do desafio | Onde está |
 | --- | --- |
 | Grafo LangGraph com estado tipado (parsing, análise, geração, validação) | [`graph/builder.py`](src/modernize/graph/builder.py), [`graph/state.py`](src/modernize/graph/state.py) |
 | Servidor local via **LangGraph CLI** com `POST /modernize` e `GET /health` | [`langgraph.json`](langgraph.json) → [`api/app.py`](src/modernize/api/app.py) |
 | PostgreSQL com `modernization_history` (toda execução, qualquer desfecho) | [`db/migrations/001_init.sql`](db/migrations/001_init.sql), [`persistence/history.py`](src/modernize/persistence/history.py) |
+| Docker Compose: servidor + PostgreSQL (+ Langfuse) | [`docker-compose.yml`](docker-compose.yml), [`Dockerfile`](Dockerfile) |
 | Resultados dos anexos B–F | [`results/`](results/) |
 | **Bônus 1** — Langfuse (trace por execução, span por nó, custo/latência do LLM) | [`observability/tracing.py`](src/modernize/observability/tracing.py), profile `observability` do Compose, [captura](#5-observabilidade-langfuse) |
 | **Bônus 3** — QA (checagem estática + pytest) | ruff (lint + format), mypy, 121 testes (unitários + integração), cobertura ≥ 85% (atual ~97%), CI no GitHub Actions |
 | **Bônus 3** — Métrica de evaluation | Fidelidade de Contrato + **Equivalência Comportamental** contra a procedure original, `POST /evaluate` |
+
+**Início rápido**
+
+```bash
+cp .env.example .env                               # preencha OPENAI_API_KEY ou use Ollama (seção 2)
+docker compose --profile observability up --build  # API em :2024, Langfuse em :3000
+curl http://localhost:2024/health                  # {"status":"ok"}
+```
+
+**Índice:** [1. Pipeline](#1-a-pipeline-e-o-fluxo-de-modernização) · [2. Como executar e testar](#2-como-executar-e-testar) · [3. Decisões e trade-offs](#3-decisões-técnicas-e-trade-offs) · [4. Banco de dados](#4-banco-de-dados) · [5. Observabilidade](#5-observabilidade-langfuse) · [6. Métricas e resultados](#6-métricas-de-evaluation) · [7. Escalabilidade](#7-escalabilidade-e-evolução) · [8. Limitações](#8-limitações-conhecidas-e-próximos-passos)
 
 ---
 
@@ -38,7 +51,7 @@ flowchart TD
 | `validate` | regras | `ast.parse`, ruff (`E9`,`F`) no código gerado, símbolo e parâmetros, comentário `# DECISION: <risco>` para cada risco e 7 checagens de **política por AST**. Com o banco legado configurado, **executa a rotina original e a gerada lado a lado** (cenários) — a "evolução desejada" do enunciado. Decide `sucesso`/`parcial`/`falha` e se volta ao LLM. | `validation` |
 | `persist` | regras | Grava **uma linha por execução** em `modernization_history`, em qualquer desfecho, com `duration_ms` e o `trace_id` do Langfuse. | `meta` |
 
-**Laço de reparo (fluxo de decisão).** Se a validação achar algo objetivo (sintaxe, nome indefinido, `DECISION` faltando, `commit` proibido, `SELECT` dentro do laço do cursor...), o grafo volta a `generate` com o código anterior e a lista de achados, até `MAX_REPAIR_ATTEMPTS` (padrão 1). Se o reparo piorar o resultado, a tentativa anterior é mantida.
+**Laço de reparo (fluxo de decisão).** Se a validação achar algo objetivo (sintaxe, nome indefinido, `DECISION` faltando, `commit` proibido, `SELECT` dentro do laço do cursor, cenário divergente do legado...), o grafo volta a `generate` com o código anterior e a lista de achados, até `MAX_REPAIR_ATTEMPTS` (padrão 1). Se o reparo piorar o resultado, a tentativa anterior é mantida.
 
 **Status.** `sucesso`: todas as checagens passaram. `parcial`: o código parseia, mas falhou em ruff, símbolo, `DECISION`, política ou em algum cenário de equivalência. `falha`: fonte inválida, LLM indisponível, código vazio ou `ast.parse` falhou depois do último reparo. Fonte vazia/corpo inválido é HTTP 422 e não entra no grafo; o resto é HTTP 200 com o desfecho no campo `status`. HTTP 500 só se o banco cair duas vezes.
 
@@ -109,6 +122,8 @@ docker compose --profile observability up --build
 
 O Postgres sobe com três databases: `pipeline` (histórico, migração aplicada no init), `legacy` (métrica de equivalência) e `langfuse`. O init só roda com volume vazio; se você tem um volume de uma versão anterior, use `docker compose down -v` uma vez.
 
+Sem o profile `observability`, deixe `LANGFUSE_PUBLIC_KEY` e `LANGFUSE_SECRET_KEY` vazias no `.env`: o tracing vira no-op e o servidor não tenta exportar para um Langfuse que não está no ar.
+
 Ollama no host: no `.env`, `OPENAI_API_KEY=ollama`, `OPENAI_MODEL=qwen2.5-coder:14b`, `OPENAI_EXTRA_BODY={"options":{"num_ctx":16384}}` e `DOCKER_OPENAI_BASE_URL=http://host.docker.internal:11434/v1` (dentro do container, `localhost` é o próprio container).
 
 ### Chamar a API
@@ -118,8 +133,8 @@ curl http://localhost:2024/health
 # {"status":"ok"}
 
 # POST /modernize com o anexo B e o schema do anexo A como contexto
-python -c "import json; print(json.dumps({'source_code': open('fixtures/fn_saldo_cliente.sql').read(), 'schema_ddl': open('fixtures/schema.sql').read()}))" > /tmp/b.json
-curl -s -X POST http://localhost:2024/modernize -H "Content-Type: application/json" --data-binary @/tmp/b.json
+python -c "import json; r = lambda f: open(f, encoding='utf-8').read(); print(json.dumps({'source_code': r('fixtures/fn_saldo_cliente.sql'), 'schema_ddl': r('fixtures/schema.sql')}))" > b.json
+curl -s -X POST http://localhost:2024/modernize -H "Content-Type: application/json" --data-binary @b.json
 
 curl http://localhost:2024/history/1        # linha persistida em modernization_history
 curl -X POST http://localhost:2024/evaluate # roda B–F e devolve as duas métricas (5+ chamadas de LLM; com modelo local, prefira o runner abaixo)
@@ -131,12 +146,26 @@ Resposta de `/modernize` (resumida):
 {
   "id": 9,
   "status": "sucesso",
-  "generated_code": "import psycopg\nfrom decimal import Decimal\n\ndef fn_saldo_cliente(conn: psycopg.Connection, p_cliente_id: int) -> Decimal: ...",
+  "generated_code": "import psycopg\nfrom decimal import Decimal\n\ndef fn_saldo_cliente(conn, p_cliente_id: int) -> Decimal: ...",
   "report": {
-    "parsing": {"ok": true, "routine_name": "fn_saldo_cliente", "routine_kind": "function", "error": null},
-    "semantic_analysis": {"ok": true, "constructs": ["parameter_in", "variable", "select_into"], "risks": [], "operations": [{"kind": "select", "count": 1}, {"kind": "return", "count": 1}], "dependencies": []},
-    "generation": {"ok": true, "model": "qwen2.5-coder:14b", "attempts": 1, "decisions": [{"risk_id": "op:select", "action": "delegated_sql", "rationale": "..."}]},
-    "validation": {"ok": true, "ast_parse_ok": true, "ruff_ok": true, "symbol_ok": true, "policy_ok": true, "policy_issues": [], "issues": []},
+    "parsing": {"ok": true, "error": null, "routine_name": "fn_saldo_cliente", "routine_kind": "function"},
+    "semantic_analysis": {
+      "ok": true,
+      "constructs": ["parameter_in", "variable", "select_into"],
+      "risks": [],
+      "operations": [{"kind": "select", "count": 1}, {"kind": "return", "count": 1}],
+      "dependencies": []
+    },
+    "generation": {
+      "ok": true, "error": null, "model": "qwen2.5-coder:14b", "attempts": 1,
+      "decisions": [{"risk_id": "op:select", "action": "delegated_sql", "rationale": "..."}]
+    },
+    "validation": {
+      "ok": true, "ast_parse_ok": true, "ruff_ok": true, "symbol_ok": true,
+      "policy_ok": true, "policy_issues": [],
+      "behavioral": {"score": 1.0, "passed": 4, "total": 4},
+      "issues": []
+    },
     "meta": {"trace_id": "83b6ba24...", "duration_ms": 64513, "pipeline_version": "0.2.0"}
   }
 }
@@ -147,7 +176,9 @@ A documentação interativa (OpenAPI) fica em `http://localhost:2024/docs`, junt
 ### Rodar fora do Docker
 
 ```bash
-uv venv --python 3.14 && uv pip install -e ".[dev]"     # ou: py -3.14 -m venv .venv && pip install -e ".[dev]"
+uv venv --python 3.14 && uv pip install -e ".[dev]"     # ou: python3.14 -m venv .venv && pip install -e ".[dev]"
+source .venv/bin/activate                               # Windows: .venv\Scripts\activate
+cp .env.example .env                                    # DATABASE_URL e LEGACY_DATABASE_URL já apontam para localhost
 docker compose up -d postgres                           # só o banco
 langgraph dev --no-browser                              # mesmo servidor, porta 2024
 ```
@@ -161,7 +192,7 @@ ruff check src tests && ruff format --check src tests
 mypy                         # pacote src/modernize
 ```
 
-Nenhum teste chama a rede nem precisa de chave: o LLM é substituído por fakes. Os testes marcados `integration` usam o Postgres do Compose (`DATABASE_URL`, `LEGACY_DATABASE_URL`) e são **pulados com mensagem** se o banco não responder. O que a suíte cobre:
+Nenhum teste chama LLM nem serviço externo, e nenhum precisa de chave: o LLM é substituído por fakes. Os testes marcados `integration` usam o Postgres do Compose (`DATABASE_URL`, `LEGACY_DATABASE_URL`) e são **pulados com mensagem** se o banco não responder. O que a suíte cobre:
 
 | Arquivo | Cobre |
 | --- | --- |
@@ -193,7 +224,7 @@ python -m modernize.evaluation.runner   # roda B–F pela pipeline, grava result
 | `DOCKER_OPENAI_BASE_URL` | sobrescreve `OPENAI_BASE_URL` só no container | vazio |
 | `MAX_REPAIR_ATTEMPTS` | reparos depois da primeira geração | `1` |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | chaves do projeto Langfuse; vazias desligam o tracing | chaves locais de dev |
-| `LANGFUSE_HOST` | URL do Langfuse (no Compose a API usa `http://langfuse-web:3000`) | `http://localhost:3000` |
+| `LANGFUSE_HOST` | URL do Langfuse (no Compose a API usa `http://langfuse-web:3000`) | `http://localhost:3000` no `.env.example` |
 
 ---
 
@@ -201,7 +232,7 @@ python -m modernize.evaluation.runner   # roda B–F pela pipeline, grava result
 
 ### Servidor: LangGraph CLI com `http.app`
 
-O enunciado pede o servidor do **LangGraph CLI** e, ao mesmo tempo, rotas próprias. `langgraph.json` publica o grafo `modernize` e aponta `http.app` para um app FastAPI com `/health`, `/modernize`, `/evaluate` e `/history/{id}` — o mecanismo oficial de rotas customizadas. O handler chama `graph.invoke` em `asyncio.to_thread`, para não bloquear o loop do servidor.
+O enunciado pede o servidor do **LangGraph CLI** e, ao mesmo tempo, rotas próprias. `langgraph.json` publica o grafo `modernize` e aponta `http.app` para um app FastAPI com `/health`, `/modernize`, `/evaluate` e `/history/{id}` — o mecanismo oficial de rotas customizadas. O handler roda a pipeline ([`pipeline.py`](src/modernize/pipeline.py): trace raiz + `graph.invoke`) em `asyncio.to_thread`, para não bloquear o loop do servidor.
 
 - *Alternativa descartada:* uvicorn + FastAPI direto. Cumpre os paths, descumpre o CLI. O health nativo (`GET /ok`) não substitui `/health`.
 - *Dependência:* `langgraph-cli[inmem]` com `langgraph-api>=0.15`. Sem o extra `inmem`, `langgraph dev` aborta com `Required package 'langgraph-api' is not installed`.
@@ -240,7 +271,7 @@ Quando `LEGACY_DATABASE_URL` está configurada e a rotina tem cenários cadastra
 
 ### Reparo limitado
 
-Validação barata dá sinal objetivo; uma volta ao LLM com o achado resolve boa parte dos casos (nome indefinido, `DECISION` esquecido, `SELECT` no laço). O limite (`MAX_REPAIR_ATTEMPTS=1`) protege custo e latência, e o melhor resultado entre as tentativas é o que fica.
+Validação barata dá sinal objetivo; uma volta ao LLM com o achado resolve boa parte dos casos (nome indefinido, `DECISION` esquecido, `SELECT` no laço, cenário divergente). Nos resultados, C e F só chegaram a `sucesso` depois de um reparo. O limite (`MAX_REPAIR_ATTEMPTS=1`) protege custo e latência, e o melhor resultado entre as tentativas é o que fica.
 
 ### Estado e persistência
 
@@ -269,7 +300,7 @@ Os resultados versionados foram gerados com **`qwen2.5-coder:14b` via Ollama**, 
 - **Reprodutibilidade:** qualquer avaliador regenera `results/` sem chave paga.
 - **Teste de estresse do desenho:** um modelo menor erra mais, e é justamente isso que exercita o que a pipeline acrescenta ao LLM — instrução por risco, política por AST, reparo e validação contra o legado. Com um modelo de fronteira, essas camadas ficariam menos visíveis.
 
-*Trade-off:* qualidade de tradução menor que a de modelos maiores (ver anexos D e E nos resultados). O adaptador fala o protocolo de chat da OpenAI, então trocar para `gpt-4.1` (padrão do `.env.example`), vLLM ou LiteLLM é só variável de ambiente; o Langfuse passa a mostrar custo em dólar automaticamente.
+*Trade-off:* qualidade de tradução menor que a de modelos maiores (ver anexos D e E nos resultados). O adaptador fala o protocolo de chat da OpenAI, então trocar para `gpt-4.1` (padrão do `.env.example`), vLLM ou LiteLLM é só variável de ambiente; para modelos com preço cadastrado no Langfuse (como `gpt-4.1`), o custo em dólar aparece sem configuração extra.
 
 ### Python 3.14
 
@@ -286,7 +317,7 @@ evaluation_scores     (id, history_id FK, routine_name, metric, score NUMERIC(6,
 ```
 
 - `generated_code` é nulo só quando não houve código; `report` é sempre o mesmo objeto da resposta HTTP (com `meta.trace_id` ligando a linha ao trace do Langfuse).
-- Migração em [`db/migrations/001_init.sql`](db/migrations/001_init.sql): aplicada no init do container **e**, de forma idempotente, na primeira escrita da aplicação (funciona contra um Postgres externo).
+- Migração em [`db/migrations/001_init.sql`](db/migrations/001_init.sql): aplicada no init do container **e**, de forma idempotente, na primeira conexão da aplicação (funciona contra um Postgres externo).
 - Inserts parametrizados com `Jsonb`; uma conexão curta por escrita (servidor sem estado). Com volume, troca-se por `psycopg_pool` sem mudar a porta `HistoryRepository`.
 - `GET /history/{id}` lê a linha de volta (404 se não existe, 503 se o banco não responde).
 
@@ -312,7 +343,7 @@ scores: contract_fidelity, behavioral_equivalence   (no /evaluate)
 
 \* O Langfuse calcula custo quando conhece o preço do modelo (ex.: `gpt-4.1`). Para modelos locais (Ollama) aparecem tokens e latência, custo zero.
 
-A instrumentação é explícita por nó (context managers do SDK), e não pelo callback do LangChain, para a árvore ser a mesma quando o grafo roda pela API, pelo runner da métrica ou por `langgraph dev` — e para a geração carregar uso de tokens do provedor. Sem chaves, tudo vira no-op; falha do Langfuse nunca derruba a pipeline.
+A instrumentação é explícita por nó (context managers do SDK), e não pelo callback do LangChain, para a árvore ser a mesma quando a pipeline roda pela API ou pelo runner da métrica — e para a geração carregar o uso de tokens que o provedor devolve. Sem chaves, tudo vira no-op; falha do Langfuse nunca derruba a pipeline.
 
 Trace do anexo D na rodada de avaliação: raiz `modernize`, spans por nó, três ciclos `generate → validate` (dois reparos), tokens e latência de cada chamada ao LLM e os dois scores da avaliação anexados ao trace:
 
@@ -334,10 +365,10 @@ Lista de traces (um por execução, inclusive a de fonte inválida que terminou 
 
 ### Fidelidade de Contrato (estática)
 
-Por rotina, quatro cheques 0/1 com peso: `ast_parse` 0,35 · `symbol_and_params` 0,25 (função com o nome da rotina, `conn` primeiro, cada IN na assinatura, cada OUT em `OutParams`) · `decision_coverage` 0,20 (um `# DECISION: <id>` por risco) · `operation_coverage` 0,20 (cada operação do IR aparece no módulo). Agregado = média simples.
+Por rotina, quatro cheques 0/1 com peso: `ast_parse` 0.35 · `symbol_and_params` 0.25 (função com o nome da rotina, `conn` primeiro, cada IN na assinatura, cada OUT em `OutParams`) · `decision_coverage` 0.20 (um `# DECISION: <id>` por risco) · `operation_coverage` 0.20 (cada operação do IR aparece no módulo). Agregado = média simples.
 
 - **Captura:** se o módulo é utilizável e honra o contrato da tradução, de forma barata e determinística — roda em qualquer lugar, sem banco.
-- **Deixa de fora:** comportamento. Numa rodada de *baseline* (modelo de 7B, só validação estática), os cinco anexos tiraram **1,0** nesta métrica com código que não funcionava.
+- **Deixa de fora:** comportamento. Numa rodada de *baseline* (modelo de 7B, só validação estática), os cinco anexos tiraram **1.0** nesta métrica com código que não funcionava.
 
 ### Equivalência Comportamental (dinâmica)
 
@@ -350,46 +381,41 @@ Por isso a segunda métrica executa **a procedure original e a função gerada c
 
 São 25 cenários ([`evaluation/scenarios.py`](src/modernize/evaluation/scenarios.py)), cada um protegendo uma regra da política: lógica de três valores (destino inexistente no D), fallback do F, arredondamento/mínimo/ramo `ELSE`/origem nula/taxa não herdada no E, `p_dias` inválido no C, cliente sem conta no B. O código gerado roda **só num subprocesso com timeout**, nunca no processo do servidor.
 
-Validação da própria métrica (testes de integração): traduções de referência escritas à mão tiram **1,0** nos 25 cenários; uma versão ingênua do D (`!=` em vez de lógica de três valores) e uma do E (taxa herdada da linha anterior) caem abaixo de 1,0. Os módulos da *baseline* de 7B, que tinham 1,0 na Fidelidade de Contrato, tiraram **0,40** aqui (B 1,0 · C 0,5 · D 0,25 · E 0,25 · F 0,0).
+Validação da própria métrica (testes de integração): traduções de referência escritas à mão tiram **1.0** nos 25 cenários; uma versão ingênua do D (`!=` em vez de lógica de três valores) e uma do E (taxa herdada da linha anterior) caem abaixo de 1.0. Os módulos da *baseline* de 7B (commit `c924ba1`), que tinham 1.0 na Fidelidade de Contrato, tiraram **0.40** aqui (B 1.0 · C 0.5 · D 0.25 · E 0.25 · F 0.0).
 
 - **Captura:** retorno, erro e efeito em tabela — o que o negócio sente.
-- **Deixa de fora:** cenários não escritos, concorrência (`FOR UPDATE` sob carga), desempenho/N+1 (coberto pela política estática), texto exato de mensagens com formatação de número diferente.
+- **Deixa de fora:** cenários não escritos, concorrência (`FOR UPDATE` sob carga), desempenho/N+1 (coberto pela política estática). Como as mensagens de erro são comparadas literalmente, uma tradução certa que formate um número de outro jeito conta como divergência (falso negativo possível).
 - **Evolução em produção:** gerar cenários por propriedade (hypothesis) a partir do schema e dos `CHECK`s; contar queries por execução para medir N+1 sem cenário dedicado; rodar o worker em sandbox sem rede (container efêmero, gVisor/Firecracker); acompanhar as duas métricas por versão de prompt/modelo no Langfuse (datasets + experiments) e usar a equivalência como *gate* de CI.
 
 ### Resultados B–F
 
 <!-- RESULTS:START -->
-Execução de `python -m modernize.evaluation.runner` com `qwen2.5-coder:14b` (Ollama local, temperatura 0, `MAX_REPAIR_ATTEMPTS=2`, validação dinâmica ligada), schema do anexo A como contexto. Código e relatório completos em `results/<rotina>/`.
+Execução de `python -m modernize.evaluation.runner` com `qwen2.5-coder:14b` (Ollama local, temperatura 0, `MAX_REPAIR_ATTEMPTS=2`, validação dinâmica ligada) e o schema do anexo A como contexto. Código e relatório completos de cada rotina em [`results/`](results/).
 
-| Anexo | Rotina | Status | Tentativas | Fidelidade de Contrato | Equivalência Comportamental | Achados estáticos |
+| Anexo | Módulo gerado | Status | Chamadas ao LLM | Contrato | Equivalência | Achados estáticos |
 | --- | --- | --- | --- | --- | --- | --- |
 | B | [`fn_saldo_cliente`](results/fn_saldo_cliente/module.py) | sucesso | 1 | 1.00 | 1.00 (4/4) | — |
 | C | [`sp_atualizar_status_contas_inativas`](results/sp_atualizar_status_contas_inativas/module.py) | sucesso | 2 | 1.00 | 1.00 (4/4) | — |
-| D | [`sp_transferir_entre_contas`](results/sp_transferir_entre_contas/module.py) | parcial | 3 | 0.80 | 0.25 (2/8) | no_untyped_jsonb_param, DECISION ausente |
+| D | [`sp_transferir_entre_contas`](results/sp_transferir_entre_contas/module.py) | parcial | 3 | 0.80 | 0.25 (2/8) | jsonb sem cast, `DECISION` ausente |
 | E | [`sp_processar_lote_taxas`](results/sp_processar_lote_taxas/module.py) | parcial | 3 | 1.00 | 0.75 (3/4) | ruff F401 |
 | F | [`sp_relatorio_mensal_cliente`](results/sp_relatorio_mensal_cliente/module.py) | sucesso | 2 | 1.00 | 1.00 (5/5) | — |
 | | **Agregado** | | | **0.96** | **0.80** | |
 
-Cenários divergentes (o que a métrica estática não enxerga):
+Onde o código gerado diverge do legado (o que a métrica estática não enxerga):
 
-- **D** · transferencia valida: python levantou erro e o legado nao: 'SQL' object has no attribute 'as_tuple'
-- **D** · origem inexistente: mensagens de erro diferentes: legado='Conta de origem 999 nao encontrada' python="'SQL' object has no attribute 'as_tuple'"
-- **D** · destino inexistente: NULL <> 'ATIVA' nao dispara o IF (erro vem da FK): mensagens de erro diferentes: legado='insert or update on table "transacoes" violates foreign key constraint "transacoes_conta_destino_id_fkey"' python="'SQL' object has no attribute 'as_tuple'"
-- **D** · destino inativo: mensagens de erro diferentes: legado='Ambas as contas precisam estar ATIVAS' python="'SQL' object has no attribute 'as_tuple'"
-- **D** · saldo insuficiente: mensagens de erro diferentes: legado='Saldo insuficiente: saldo=500.50 valor=5000.00' python="'SQL' object has no attribute 'as_tuple'"
-- **D** · valor igual ao saldo passa: python levantou erro e o legado nao: 'SQL' object has no attribute 'as_tuple'
-- **E** · lote com arredondamento, minimo, origem nula e ramo ELSE: efeito diferente na tabela contas
+- **D — 6 de 8 cenários.** O módulo monta o JSON de auditoria com `psycopg.sql.SQL(...).as_tuple(...)`, API que não existe, e deixa um `%s` sem cast no `jsonb_build_object`. Toda chamada quebra com `'SQL' object has no attribute 'as_tuple'` antes de chegar às regras de negócio, então nem a transferência válida nem as mensagens esperadas (`Conta de origem 999 nao encontrada`, erro de FK do destino inexistente, `Saldo insuficiente: saldo=500.50 valor=5000.00`...) aparecem. Passam só os dois cenários em que a validação inicial (valor zero, origem igual ao destino) levanta antes de qualquer SQL.
+- **E — 1 de 4 cenários.** O módulo importa `ROUND_HALF_UP`, mas não arredonda para `NUMERIC(18,2)` a cada atribuição: a tarifa fica 1.875 em vez de 1.88 e o débito em `contas` diverge. É exatamente o caso que o cenário "lote com arredondamento, mínimo, origem nula e ramo ELSE" foi escrito para pegar.
 <!-- RESULTS:END -->
 
 Evolução das rodadas sobre os mesmos cinco anexos (mostra por que a segunda métrica existe):
 
 | Rodada | Fidelidade de Contrato | Equivalência Comportamental |
 | --- | --- | --- |
-| *Baseline*: `qwen2.5-coder:7b`, só validação estática mínima | 1,00 | 0,40 |
-| `qwen2.5-coder:14b` + prompt com instrução por risco + política por AST + reparo | 1,00 | 0,70 |
-| `qwen2.5-coder:14b` + validação dinâmica alimentando o reparo (versão entregue) | 0,96 | 0,80 |
+| *Baseline*: `qwen2.5-coder:7b`, só validação estática mínima (commit `c924ba1`) | 1.00 | 0.40 |
+| `qwen2.5-coder:14b` + prompt com instrução por risco + política por AST + reparo (rodada intermediária) | 1.00 | 0.70 |
+| `qwen2.5-coder:14b` + validação dinâmica alimentando o reparo (versão entregue) | 0.96 | 0.80 |
 
-Leitura: a métrica estática ficou praticamente parada em 1,0 enquanto o comportamento real dobrou. O que sobra é limite do modelo local, e a pipeline diz exatamente onde: no **D**, o 14B insiste em montar o JSON de auditoria com `psycopg.sql.SQL(...).as_tuple(...)` (API inexistente) e com `%s` sem cast, então toda chamada quebra antes de chegar às regras de negócio — o status fica `parcial` e o relatório lista os seis cenários. No **E**, importa `ROUND_HALF_UP` mas não arredonda `NUMERIC(18,2)` a cada atribuição; a tarifa fica 1,875 em vez de 1,88 e o cenário de arredondamento acusa "efeito diferente na tabela contas" — exatamente o caso que o cenário foi escrito para pegar. Com um modelo maior (`OPENAI_MODEL=gpt-4.1`), a mesma pipeline roda sem mudança de código; as traduções de referência em `tests/reference/` mostram que 1,0 nas duas métricas é alcançável.
+Leitura: a métrica estática ficou praticamente parada em 1.0 enquanto o comportamento real dobrou (0.40 → 0.80). O que sobra é limite do modelo local, e a pipeline aponta exatamente onde, com status `parcial` e os cenários no relatório. Com um modelo maior (`OPENAI_MODEL=gpt-4.1`), a mesma pipeline roda sem mudança de código; as traduções de referência em `tests/reference/` mostram que 1.0 nas duas métricas é alcançável.
 
 ---
 
@@ -418,7 +444,7 @@ Propostas (não implementadas, por escopo):
 - O subprocesso da métrica isola memória e tempo, **não privilégio**: o código gerado ainda tem rede e disco. Produção pede sandbox.
 - Só PL/pgSQL; outro dialeto falha no parse. `parse_plpgsql` não tem AST estável — o IR e os testes de ouro absorvem isso.
 - `GET /health` não verifica o Postgres (separa "processo no ar" de "pipeline pronta"); falha de banco aparece na execução.
-- Sem fila, o cliente espera o tempo do modelo (dezenas de segundos com modelo local).
+- Sem fila, o cliente espera o tempo do modelo: de segundos a alguns minutos por rotina com modelo local, mais com reparos.
 - O log de erro do anexo D só sobrevive se o chamador passar `audit_conn` — comportamento do legado preservado de propósito.
 
 Com mais tempo, nesta ordem: cenários por propriedade e contagem de queries; cache; fila; roteamento de modelo; segundo dialeto atrás da mesma porta.
