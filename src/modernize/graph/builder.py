@@ -1,5 +1,6 @@
 from langgraph.graph import END, START, StateGraph
 
+from modernize.env import load_local_env
 from modernize.generation.llm import OpenAIGenerator
 from modernize.graph.state import PipelineState
 from modernize.nodes.analyze import analyze_node
@@ -42,4 +43,5 @@ def build_graph(repo, llm):
     return graph.compile()
 
 
+load_local_env()
 graph = build_graph(PsycopgHistory(), OpenAIGenerator())

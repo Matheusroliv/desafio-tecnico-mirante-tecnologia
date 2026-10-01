@@ -24,6 +24,7 @@ def run_evaluation(compiled_graph, repo, fixtures_dir: Path | None = None, write
     for filename in ORDER:
         source = (base / filename).read_text(encoding="utf-8")
         state = compiled_graph.invoke(initial_state(source, schema))
+        print(filename, state.get("status"), flush=True)
         ir = RoutineIR.model_validate(state["ir"]) if state.get("ir") else None
         scored = contract_score(ir, state.get("generated_code"))
         history_id = state.get("history_id")

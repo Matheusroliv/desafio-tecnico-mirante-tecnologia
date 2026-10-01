@@ -1,0 +1,86 @@
+{
+  "status": "parcial",
+  "history_id": 11,
+  "score": {
+    "score": 1.0,
+    "checks": {
+      "ast_parse": 1,
+      "symbol_and_params": 1,
+      "decision_coverage": 1,
+      "operation_coverage": 1
+    }
+  },
+  "report": {
+    "parsing": {
+      "ok": true,
+      "error": null,
+      "routine_name": "fn_saldo_cliente",
+      "routine_kind": "function"
+    },
+    "semantic_analysis": {
+      "ok": true,
+      "constructs": [
+        "parameter_in",
+        "variable",
+        "select_into"
+      ],
+      "risks": [],
+      "operations": [
+        {
+          "kind": "select",
+          "count": 1
+        },
+        {
+          "kind": "return",
+          "count": 1
+        }
+      ],
+      "dependencies": []
+    },
+    "generation": {
+      "ok": true,
+      "error": null,
+      "model": null,
+      "decisions": [
+        {
+          "risk_id": "op:select",
+          "action": "delegated_sql",
+          "rationale": "select permanece na traducao combinada"
+        },
+        {
+          "risk_id": "op:return",
+          "action": "preserved",
+          "rationale": "return permanece na traducao combinada"
+        }
+      ]
+    },
+    "validation": {
+      "ok": false,
+      "ast_parse_ok": true,
+      "ruff_ok": false,
+      "symbol_ok": true,
+      "issues": [
+        "F401 [*] `psycopg` imported but unused",
+        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmppw9f49p7.py:1:8",
+        "|",
+        "1 | import psycopg",
+        "|        ^^^^^^^",
+        "2 |",
+        "3 | def fn_saldo_cliente(conn, p_cliente_id: int) -> Decimal:",
+        "|",
+        "help: Remove unused import: `psycopg`",
+        "|",
+        "- import psycopg",
+        "1 |",
+        "|",
+        "F821 Undefined name `Decimal`",
+        "--> C:\\Users\\matheus\\AppData\\Local\\Temp\\tmppw9f49p7.py:3:50",
+        "|",
+        "1 | import psycopg",
+        "2 |",
+        "3 | def fn_saldo_cliente(conn, p_cliente_id: int) -> Decimal:",
+        "|                                                  ^^^^^^^"
+      ]
+    }
+  }
+}

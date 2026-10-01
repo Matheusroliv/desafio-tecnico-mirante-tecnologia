@@ -83,11 +83,14 @@ def ruff_problems(code: str) -> tuple[bool, list[str]]:
     try:
         handle.write(code)
         handle.close()
+        env = os.environ.copy()
+        env["NO_COLOR"] = "1"
         proc = subprocess.run(
-            [binary, "check", "--select", "E9,F", path],
+            [binary, "check", "--select", "E9,F", "--color", "never", path],
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
     finally:
         os.remove(path)

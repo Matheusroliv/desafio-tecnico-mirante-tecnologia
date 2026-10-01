@@ -7,6 +7,8 @@ POLITICA DE TRADUCAO
 
 Alvo: Python 3.14, compativel com 3.13. NUMERIC vira Decimal. Sem float para dinheiro.
 A funcao recebe conn como primeiro argumento e nao abre conexao nem da commit.
+Importe psycopg. Nunca psycopg2. Nao importe nome que o modulo nao usa.
+O modulo precisa ser aceito por ast.parse: parenteses e aspas fechados.
 SQL de conjunto, agregacao, UPDATE em massa e CTE recursiva permanecem SQL no psycopg, com placeholder %s.
 Controle, validacao e RAISE viram Python. O raise fica no mesmo try do bloco EXCEPTION original.
 WHEN OTHERS sem RAISE posterior devolve o fallback e nao propaga.
