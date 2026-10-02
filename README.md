@@ -23,6 +23,8 @@ docker compose --profile observability up --build  # API em :2024, Langfuse em :
 curl http://localhost:2024/health                  # {"status":"ok"}
 ```
 
+Sem LLM configurado a API sobe normalmente e `POST /modernize` responde `status: "falha"` com parsing e análise preenchidos no relatório. Para ver código gerado, configure a chave ou o Ollama. O exemplo de requisição está na [seção 2](#2-como-executar-e-testar).
+
 **Índice:** [1. Pipeline](#1-a-pipeline-e-o-fluxo-de-modernização) · [2. Como executar e testar](#2-como-executar-e-testar) · [3. Decisões e trade-offs](#3-decisões-técnicas-e-trade-offs) · [4. Banco de dados](#4-banco-de-dados) · [5. Observabilidade](#5-observabilidade-langfuse) · [6. Métricas e resultados](#6-métricas-de-evaluation) · [7. Escalabilidade](#7-escalabilidade-e-evolução) · [8. Limitações](#8-limitações-conhecidas-e-próximos-passos)
 
 ---
